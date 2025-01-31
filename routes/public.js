@@ -1,4 +1,3 @@
-//publi.js
 import express from 'express';
 import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
@@ -113,6 +112,62 @@ router.get("/me", async (req, res) => {
   } catch (err) {
     console.error("Erro ao buscar dados do usuário:", err);
     res.status(500).json({ error: "Erro ao buscar dados do usuário" });
+  }
+});
+
+router.post("/produtos", async (req, res) => {
+  try {
+    const { name, category, description } = req.body;
+    const authHeader = req.headers.authorization;
+
+    if (!authHeader) {
+      return res.status(401).json({ error: "Token não fornecido" });
+    }
+
+    const token = authHeader.split(" ")[1];
+    const decoded = jwt.verify(token, JWT_SECRET);
+
+    // Salvar produto no banco de dados
+    const savedProduct = await prisma.product.create({
+      data: {
+        name,
+        category,
+        description,
+        userId: decoded.userId, // Associar o produto ao usuário
+      },
+    });
+
+    res.status(201).json({
+      message: "Produto cadastrado com sucesso",
+      product: savedProduct,
+    });
+  } catch (err) {
+    console.error("Erro ao cadastrar produto:", err);
+    res.status(500).json({ error: "Erro ao cadastrar produto" });
+  }
+});
+
+// Endpoint de Listagem de Produtos
+router.get("/produtos", async (req, res) => {
+  try {
+    const authHeader = req.headers.authorization;
+
+    if (!authHeader) {
+      return res.status(401).json({ error: "Token não fornecido" });
+    }
+
+    const token = authHeader.split(" ")[1];
+    const decoded = jwt.verify(token, JWT_SECRET);
+
+    // Buscar produtos do usuário
+    const products = await prisma.product.findMany({
+      where: { userId: decoded.userId },
+    });
+
+    res.status(200).json(products);
+  } catch (err) {
+    console.error("Erro ao listar produtos:", err);
+    res.status(500).json({ error: "Erro ao listar produtos" });
   }
 });
 
