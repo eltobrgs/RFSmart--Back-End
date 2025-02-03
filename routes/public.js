@@ -3,7 +3,6 @@ import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
 import { PrismaClient } from '@prisma/client';
 import multer from 'multer';
-import path from 'path';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
