@@ -2,126 +2,173 @@ import express from 'express';
 import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
 import { PrismaClient } from '@prisma/client';
-import multer from 'multer';
-import fs from 'fs';
-import path from 'path';
-import { fileURLToPath } from 'url';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
 
 const router = express.Router();
 const prisma = new PrismaClient();
-const JWT_SECRET = process.env.JWT_SECRET || 'seuSegredoJWT';
+const JWT_SECRET = process.env.JWT_SECRET;
 
-// Criar diretório de uploads caso não exista
-const uploadDir = 'uploads/';
-if (!fs.existsSync(uploadDir)) {
-  fs.mkdirSync(uploadDir, { recursive: true });
-}
-
-// Configuração do multer
-const storage = multer.diskStorage({
-  destination: (_, __, cb) => {
-    cb(null, uploadDir);
-  },
-  filename: (_, file, cb) => {
-    cb(null, Date.now() + path.extname(file.originalname));
-  }
-});
-
-const upload = multer({ storage });
-
-// Middleware para autenticação
-const authenticate = (req, res, next) => {
-  try {
-    const authHeader = req.headers.authorization;
-    if (!authHeader) return res.status(401).json({ error: 'Token não fornecido' });
-    
-    const token = authHeader.split(' ')[1];
-    req.user = jwt.verify(token, JWT_SECRET);
-    next();
-  } catch (err) {
-    return res.status(401).json({ error: 'Token inválido' });
-  }
-};
-
-// Cadastro de Usuário
+// Endpoint de Cadastro
 router.post("/cadastro", async (req, res) => {
   try {
-    const { name, email, password } = req.body;
-    const hash = await bcrypt.hash(password, 10);
-    const savedUser = await prisma.user.create({ data: { name, email, password: hash } });
+    const user = req.body;
+    console.log("Dados do usuário recebidos:", user);
+
+    // Gerar hash da senha
+    const salt = await bcrypt.genSalt(10);
+    const hash = await bcrypt.hash(user.password, salt);
+
+    // Salvar usuário no banco de dados
+    const savedUser = await prisma.user.create({
+      data: {
+        name: user.name,
+        email: user.email,
+        password: hash,
+      },
+    });
+    console.log("Usuário salvo no banco de dados:", savedUser);
+
+    // Gerar o token JWT
     const token = jwt.sign({ userId: savedUser.id }, JWT_SECRET, { expiresIn: '1h' });
-    res.status(201).json({ message: "Cadastro realizado com sucesso", token, user: { id: savedUser.id, name, email } });
+
+    // Retornar o token e dados do usuário (sem a senha)
+    res.status(201).json({
+      message: "Cadastro realizado com sucesso",
+      token: token,
+      user: {
+        id: savedUser.id,
+        name: savedUser.name,
+        email: savedUser.email,
+      },
+    });
   } catch (err) {
+    console.error("Erro ao realizar cadastro:", err);
     res.status(500).json({ error: "Erro ao realizar cadastro" });
   }
 });
 
-// Login de Usuário
+// Endpoint de Login
 router.post("/login", async (req, res) => {
   try {
     const { email, password } = req.body;
-    const user = await prisma.user.findUnique({ where: { email } });
-    if (!user || !(await bcrypt.compare(password, user.password))) {
-      return res.status(401).json({ error: "Credenciais inválidas" });
+    console.log("Tentativa de login com email:", email);
+
+    // Buscar usuário pelo email
+    const user = await prisma.user.findUnique({
+      where: { email },
+    });
+
+    if (!user) {
+      console.log("Usuário não encontrado:", email);
+      return res.status(404).json({ error: "Usuário não encontrado" });
     }
-    const token = jwt.sign({ userId: user.id }, JWT_SECRET, { expiresIn: '1h' });
-    res.json({ message: "Login bem-sucedido", token, user: { id: user.id, name: user.name, email: user.email } });
+
+    // Verificar senha
+    const isMatch = await bcrypt.compare(password, user.password);
+    if (!isMatch) {
+      console.log("Senha incorreta para o usuário:", email);
+      return res.status(401).json({ error: "Senha incorreta" });
+    }
+
+    // Gerar o token JWT
+    const token = jwt.sign({ userId: user.id }, JWT_SECRET, { expiresIn: '10m' });
+
+    res.status(200).json({
+      message: "Login bem-sucedido",
+      token: token,
+      user: {
+        id: user.id,
+        name: user.name,
+        email: user.email,
+      },
+    });
   } catch (err) {
+    console.error("Erro ao realizar login:", err);
     res.status(500).json({ error: "Erro ao realizar login" });
   }
 });
 
-// Obter dados do usuário autenticado
-router.get("/me", authenticate, async (req, res) => {
+// Endpoint para buscar dados do usuário
+router.get("/me", async (req, res) => {
   try {
-    const user = await prisma.user.findUnique({ where: { id: req.user.userId }, select: { id: true, name: true, email: true } });
-    res.json(user);
+    const authHeader = req.headers.authorization;
+
+    if (!authHeader) {
+      return res.status(401).json({ error: "Token não fornecido" });
+    }
+
+    const token = authHeader.split(" ")[1];
+    const decoded = jwt.verify(token, JWT_SECRET);
+
+    const user = await prisma.user.findUnique({
+      where: { id: decoded.userId },
+      select: { id: true, name: true, email: true }, // Campos retornados
+    });
+
+    if (!user) {
+      return res.status(404).json({ error: "Usuário não encontrado" });
+    }
+
+    res.status(200).json(user);
   } catch (err) {
+    console.error("Erro ao buscar dados do usuário:", err);
     res.status(500).json({ error: "Erro ao buscar dados do usuário" });
   }
 });
 
-// Cadastro de Produtos
-router.post("/produtos", authenticate, upload.fields([{ name: 'pdf' }, { name: 'video' }]), async (req, res) => {
+router.post("/produtos", async (req, res) => {
   try {
     const { name, category, description } = req.body;
-    const pdfUrl = req.files['pdf'] ? `/uploads/${req.files['pdf'][0].filename}` : null;
-    const videoUrl = req.files['video'] ? `/uploads/${req.files['video'][0].filename}` : null;
-    
+    const authHeader = req.headers.authorization;
+
+    if (!authHeader) {
+      return res.status(401).json({ error: "Token não fornecido" });
+    }
+
+    const token = authHeader.split(" ")[1];
+    const decoded = jwt.verify(token, JWT_SECRET);
+
+    // Salvar produto no banco de dados
     const savedProduct = await prisma.product.create({
-      data: { name, category, description, userId: req.user.userId, pdfUrl, videoUrl }
+      data: {
+        name,
+        category,
+        description,
+        userId: decoded.userId, // Associar o produto ao usuário
+      },
     });
-    res.status(201).json({ message: "Produto cadastrado com sucesso", product: savedProduct });
+
+    res.status(201).json({
+      message: "Produto cadastrado com sucesso",
+      product: savedProduct,
+    });
   } catch (err) {
+    console.error("Erro ao cadastrar produto:", err);
     res.status(500).json({ error: "Erro ao cadastrar produto" });
   }
 });
 
-// Listagem de Produtos
-router.get("/produtos", authenticate, async (req, res) => {
+// Endpoint de Listagem de Produtos
+router.get("/produtos", async (req, res) => {
   try {
-    const products = await prisma.product.findMany({ where: { userId: req.user.userId } });
-    res.json(products);
+    const authHeader = req.headers.authorization;
+
+    if (!authHeader) {
+      return res.status(401).json({ error: "Token não fornecido" });
+    }
+
+    const token = authHeader.split(" ")[1];
+    const decoded = jwt.verify(token, JWT_SECRET);
+
+    // Buscar produtos do usuário
+    const products = await prisma.product.findMany({
+      where: { userId: decoded.userId },
+    });
+
+    res.status(200).json(products);
   } catch (err) {
+    console.error("Erro ao listar produtos:", err);
     res.status(500).json({ error: "Erro ao listar produtos" });
   }
 });
-
-// Detalhes de um Produto
-router.get("/produtos/:id", authenticate, async (req, res) => {
-  try {
-    const product = await prisma.product.findUnique({ where: { id: req.params.id } });
-    if (!product) return res.status(404).json({ error: "Produto não encontrado" });
-    res.json(product);
-  } catch (err) {
-    res.status(500).json({ error: "Erro ao buscar produto" });
-  }
-});
-
-// Servindo arquivos estáticos
-router.use('/uploads', express.static(path.join(__dirname, '..', 'uploads')));
 
 export default router;
