@@ -1,12 +1,31 @@
 import express from 'express';
-import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
+import multer from 'multer';
+import path from 'path';
 import { PrismaClient } from '@prisma/client';
 
 const router = express.Router();
 const prisma = new PrismaClient();
 const JWT_SECRET = process.env.JWT_SECRET;
 
+// Configuração do Multer para uploads
+const storage = multer.diskStorage({
+    destination: (req, file, cb) => {
+        if (file.mimetype.startsWith('video/')) {
+            cb(null, 'uploads/videos/');
+        } else if (file.mimetype === 'application/pdf') {
+            cb(null, 'uploads/pdfs/');
+        } else {
+            cb(new Error('Tipo de arquivo não suportado'), false);
+        }
+    },
+    filename: (req, file, cb) => {
+        const ext = path.extname(file.originalname);
+        cb(null, `${Date.now()}${ext}`);
+    }
+});
+
+const upload = multer({ storage });
 // Endpoint de Cadastro
 router.post("/cadastro", async (req, res) => {
   try {
@@ -114,26 +133,33 @@ router.get("/me", async (req, res) => {
     res.status(500).json({ error: "Erro ao buscar dados do usuário" });
   }
 });
-
-router.post("/produtos", async (req, res) => {
+// Rota para cadastrar produto com arquivos
+router.post("/produtos", upload.fields([{ name: 'pdf' }, { name: 'video' }]), async (req, res) => {
   try {
     const { name, category, description } = req.body;
     const authHeader = req.headers.authorization;
 
-    if (!authHeader) {
-      return res.status(401).json({ error: "Token não fornecido" });
-    }
+    if (!authHeader) return res.status(401).json({ error: "Token não fornecido" });
 
     const token = authHeader.split(" ")[1];
     const decoded = jwt.verify(token, JWT_SECRET);
 
-    // Salvar produto no banco de dados
+    if (!req.files || !req.files['pdf'] || !req.files['video']) {
+      return res.status(400).json({ error: "PDF e Vídeo são obrigatórios" });
+    }
+
+    const pdfPath = req.files['pdf'][0].path;
+    const videoPath = req.files['video'][0].path;
+
+    // Salvar no banco
     const savedProduct = await prisma.product.create({
       data: {
         name,
         category,
         description,
-        userId: decoded.userId, // Associar o produto ao usuário
+        pdfPath,
+        videoPath,
+        userId: decoded.userId,
       },
     });
 
@@ -147,19 +173,16 @@ router.post("/produtos", async (req, res) => {
   }
 });
 
-// Endpoint de Listagem de Produtos
+// Endpoint para listar produtos (incluindo URLs de arquivos)
 router.get("/produtos", async (req, res) => {
   try {
     const authHeader = req.headers.authorization;
 
-    if (!authHeader) {
-      return res.status(401).json({ error: "Token não fornecido" });
-    }
+    if (!authHeader) return res.status(401).json({ error: "Token não fornecido" });
 
     const token = authHeader.split(" ")[1];
     const decoded = jwt.verify(token, JWT_SECRET);
 
-    // Buscar produtos do usuário
     const products = await prisma.product.findMany({
       where: { userId: decoded.userId },
     });
@@ -172,3 +195,4 @@ router.get("/produtos", async (req, res) => {
 });
 
 export default router;
+
