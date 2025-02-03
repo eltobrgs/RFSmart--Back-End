@@ -2,10 +2,24 @@ import express from 'express';
 import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
 import { PrismaClient } from '@prisma/client';
+import multer from 'multer';
+import path from 'path';
 
 const router = express.Router();
 const prisma = new PrismaClient();
 const JWT_SECRET = process.env.JWT_SECRET;
+
+// Configuração do multer
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    cb(null, 'uploads/'); // Pasta onde os arquivos serão armazenados
+  },
+  filename: (req, file, cb) => {
+    cb(null, Date.now() + path.extname(file.originalname)); // Nome do arquivo
+  }
+});
+
+const upload = multer({ storage: storage });
 
 // Endpoint de Cadastro
 router.post("/cadastro", async (req, res) => {
@@ -115,7 +129,8 @@ router.get("/me", async (req, res) => {
   }
 });
 
-router.post("/produtos", async (req, res) => {
+// Endpoint de Cadastro de Produtos
+router.post("/produtos", upload.fields([{ name: 'pdf' }, { name: 'video' }]), async (req, res) => {
   try {
     const { name, category, description } = req.body;
     const authHeader = req.headers.authorization;
@@ -134,6 +149,8 @@ router.post("/produtos", async (req, res) => {
         category,
         description,
         userId: decoded.userId, // Associar o produto ao usuário
+        pdfUrl: req.files['pdf'] ? req.files['pdf'][0].path : null, // URL do PDF
+        videoUrl: req.files['video'] ? req.files['video'][0].path : null // URL do vídeo
       },
     });
 
@@ -168,6 +185,26 @@ router.get("/produtos", async (req, res) => {
   } catch (err) {
     console.error("Erro ao listar produtos:", err);
     res.status(500).json({ error: "Erro ao listar produtos" });
+  }
+});
+
+// Endpoint para Detalhes do Produto
+router.get("/produtos/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const product = await prisma.product.findUnique({
+      where: { id: Number(id) },
+    });
+
+    if (!product) {
+      return res.status(404).json({ error: "Produto não encontrado" });
+    }
+
+    res.status(200).json(product);
+  } catch (err) {
+    console.error("Erro ao buscar produto:", err);
+    res.status(500).json({ error: "Erro ao buscar produto" });
   }
 });
 
