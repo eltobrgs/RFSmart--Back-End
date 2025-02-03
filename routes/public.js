@@ -11,10 +11,10 @@ const JWT_SECRET = process.env.JWT_SECRET;
 
 // Configuração do multer
 const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
+  destination: (_, __, cb) => {
     cb(null, 'uploads/'); // Pasta onde os arquivos serão armazenados
   },
-  filename: (req, file, cb) => {
+  filename: (_, file, cb) => {
     cb(null, Date.now() + path.extname(file.originalname)); // Nome do arquivo
   }
 });
