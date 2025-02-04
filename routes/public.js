@@ -117,29 +117,25 @@ router.get("/me", async (req, res) => {
 
 router.post("/produtos", async (req, res) => {
   try {
-    const { name, category, description } = req.body;
-    const authHeader = req.headers.authorization;
-
-    if (!authHeader) {
-      return res.status(401).json({ error: "Token não fornecido" });
-    }
-
-    const token = authHeader.split(" ")[1];
+    const { name, category, description, image_url, pdf_url, video_url } = req.body;
+    const token = req.headers.authorization.split(" ")[1];
     const decoded = jwt.verify(token, JWT_SECRET);
 
-    // Salvar produto no banco de dados
-    const savedProduct = await prisma.product.create({
+    const product = await prisma.product.create({
       data: {
         name,
         category,
         description,
-        userId: decoded.userId, // Associar o produto ao usuário
+        image_url,
+        pdf_url,
+        video_url,
+        user_id: decoded.userId,
       },
     });
 
     res.status(201).json({
       message: "Produto cadastrado com sucesso",
-      product: savedProduct,
+      product,
     });
   } catch (err) {
     console.error("Erro ao cadastrar produto:", err);
