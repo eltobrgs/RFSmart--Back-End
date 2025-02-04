@@ -10,16 +10,40 @@ const router = express.Router();
 const prisma = new PrismaClient();
 const JWT_SECRET = process.env.JWT_SECRET;
 
-// Configuração do Multer para armazenar arquivos na memória
+// Configuração do Multer
 const storage = multer.memoryStorage();
-const upload = multer({ storage: storage });
-
-// Conectar ao GridFS
-const conn = mongoose.connection;
-let bucket;
-conn.once("open", () => {
-  bucket = new GridFSBucket(conn.db, { bucketName: "uploads" });
+const upload = multer({ 
+    storage: storage,
+    limits: {
+        fileSize: 50 * 1024 * 1024 // 50MB
+    }
 });
+
+// Conexão com GridFS
+let bucket;
+mongoose.connection.on('open', () => {
+    bucket = new GridFSBucket(mongoose.connection.db, {
+        bucketName: 'uploads'
+    });
+});
+
+// Função para upload de arquivo
+const uploadFileToGridFS = (file) => {
+    return new Promise((resolve, reject) => {
+        if (!file) return resolve(null);
+        
+        const uploadStream = bucket.openUploadStream(file.originalname, {
+            metadata: {
+                mimetype: file.mimetype,
+                uploadDate: new Date()
+            }
+        });
+
+        uploadStream.on('error', reject);
+        uploadStream.on('finish', () => resolve(uploadStream.id));
+        uploadStream.end(file.buffer);
+    });
+};
 
 // Endpoint de Cadastro
 router.post("/cadastro", async (req, res) => {
@@ -134,61 +158,80 @@ router.get("/me", async (req, res) => {
 
 
 
-
-// Endpoint para cadastrar produto com upload de arquivos
-router.post("/produtos", upload.fields([
-  { name: "pdf", maxCount: 1 },
-  { name: "image", maxCount: 1 },
-  { name: "video", maxCount: 1 }
+// Rota de cadastro de produto
+router.post('/produtos', upload.fields([
+  { name: 'pdf', maxCount: 1 },
+  { name: 'image', maxCount: 1 },
+  { name: 'video', maxCount: 1 }
 ]), async (req, res) => {
   try {
-    console.log("Requisição recebida:", req.body);
-    console.log("Arquivos recebidos:", req.files);
+      const { name, category, description } = req.body;
+      const authHeader = req.headers.authorization;
 
-    const { name, category, description } = req.body;
-    const authHeader = req.headers.authorization;
+      if (!authHeader) return res.status(401).json({ error: 'Token não fornecido' });
 
-    if (!authHeader) {
-      return res.status(401).json({ error: "Token não fornecido" });
-    }
+      const token = authHeader.split(' ')[1];
+      const decoded = jwt.verify(token, JWT_SECRET);
 
-    const token = authHeader.split(" ")[1];
-    const decoded = jwt.verify(token, JWT_SECRET);
+      // Upload dos arquivos
+      const files = req.files;
+      const fileIds = {};
 
-    let fileIds = {};
-    for (const fileKey of ["pdf", "image", "video"]) {
-      if (req.files[fileKey]) {
-        const file = req.files[fileKey][0];
-        const uploadStream = bucket.openUploadStream(file.originalname);
-        uploadStream.end(file.buffer);
-
-        console.log(`Arquivo ${fileKey} salvo com ID:`, uploadStream.id);
-        fileIds[fileKey] = uploadStream.id.toString();
+      if (files) {
+          for (const fileType of ['pdf', 'image', 'video']) {
+              if (files[fileType] && files[fileType][0]) {
+                  fileIds[fileType] = await uploadFileToGridFS(files[fileType][0]);
+              }
+          }
       }
-    }
 
-    console.log("Salvando produto no banco:", { name, category, description, fileIds });
+      // Criação do produto no banco
+      const product = await prisma.product.create({
+          data: {
+              name,
+              category,
+              description,
+              userId: decoded.userId,
+              pdfId: fileIds.pdf || null,
+              imageId: fileIds.image || null,
+              videoId: fileIds.video || null
+          }
+      });
 
-    const savedProduct = await prisma.product.create({
-      data: {
-        name,
-        category,
-        description,
-        userId: decoded.userId,
-        pdfId: fileIds.pdf || null,
-        imageId: fileIds.image || null,
-        videoId: fileIds.video || null,
-      },
-    });
+      res.status(201).json({
+          message: 'Produto cadastrado com sucesso',
+          product: {
+              ...product,
+              pdfUrl: fileIds.pdf ? `/arquivos/${fileIds.pdf}` : null,
+              imageUrl: fileIds.image ? `/arquivos/${fileIds.image}` : null,
+              videoUrl: fileIds.video ? `/arquivos/${fileIds.video}` : null
+          }
+      });
+  } catch (error) {
+      console.error('Erro no cadastro:', error);
+      res.status(500).json({ 
+          error: 'Erro ao cadastrar produto',
+          details: error.message
+      });
+  }
+});
 
-    console.log("Produto cadastrado com sucesso:", savedProduct);
-    res.status(201).json({
-      message: "Produto cadastrado com sucesso",
-      product: savedProduct,
-    });
-  } catch (err) {
-    console.error("Erro ao cadastrar produto:", err);
-    res.status(500).json({ error: "Erro ao cadastrar produto", details: err.message });
+// Rota para buscar arquivos
+router.get('/arquivos/:id', async (req, res) => {
+  try {
+      const fileId = new mongoose.Types.ObjectId(req.params.id);
+      const file = await bucket.find({ _id: fileId }).toArray();
+      
+      if (!file || file.length === 0) {
+          return res.status(404).json({ error: 'Arquivo não encontrado' });
+      }
+
+      res.set('Content-Type', file[0].metadata.mimetype);
+      const downloadStream = bucket.openDownloadStream(fileId);
+      downloadStream.pipe(res);
+  } catch (error) {
+      console.error('Erro ao recuperar arquivo:', error);
+      res.status(500).json({ error: 'Erro ao recuperar arquivo' });
   }
 });
 
@@ -217,16 +260,6 @@ router.get("/produtos/:id", async (req, res) => {
   }
 });
 
-// Endpoint para recuperar arquivos
-router.get("/arquivos/:id", async (req, res) => {
-  try {
-    const { id } = req.params;
-    const downloadStream = bucket.openDownloadStream(new mongoose.Types.ObjectId(id));
-    downloadStream.pipe(res);
-  } catch (err) {
-    console.error("Erro ao recuperar arquivo:", err);
-    res.status(500).json({ error: "Erro ao recuperar arquivo" });
-  }
-});
+
 
 export default router;
