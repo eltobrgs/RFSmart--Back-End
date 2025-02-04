@@ -1,35 +1,12 @@
 import express from 'express';
 import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
-import multer from 'multer';
-import { createClient } from '@supabase/supabase-js';
-import dotenv from 'dotenv';
 import { PrismaClient } from '@prisma/client';
 
-dotenv.config();
 const router = express.Router();
 const prisma = new PrismaClient();
 const JWT_SECRET = process.env.JWT_SECRET;
-const supabaseUrl = process.env.SUPABASE_URL;
-const supabaseKey = process.env.SUPABASE_ANON_KEY;
-const supabase = createClient(supabaseUrl, supabaseKey);
 
-// Configuração do Multer para upload de arquivos
-const storage = multer.memoryStorage();
-const upload = multer({ storage: storage });
-
-// Função para enviar arquivo para o Supabase Storage
-const uploadFileToSupabase = async (file) => {
-  const { data, error } = await supabase.storage
-    .from('uploads')
-    .upload(`uploads/${Date.now()}-${file.originalname}`, file.buffer, {
-      contentType: file.mimetype,
-      upsert: false,
-    });
-
-  if (error) throw error;
-  return data.path; // Retorna o caminho do arquivo no Supabase
-};
 // Endpoint de Cadastro
 router.post("/cadastro", async (req, res) => {
   try {
@@ -138,59 +115,35 @@ router.get("/me", async (req, res) => {
   }
 });
 
-// Endpoint para cadastrar produtos com arquivos
-router.post('/produtos', upload.fields([{ name: 'pdf' }, { name: 'image' }, { name: 'video' }]), async (req, res) => {
+router.post("/produtos", async (req, res) => {
   try {
-    console.log('Dados do corpo:', req.body);
-    console.log('Arquivos recebidos:', req.files);
-
     const { name, category, description } = req.body;
     const authHeader = req.headers.authorization;
 
     if (!authHeader) {
-      return res.status(401).json({ error: 'Token não fornecido' });
+      return res.status(401).json({ error: "Token não fornecido" });
     }
 
-    const token = authHeader.split(' ')[1];
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    const token = authHeader.split(" ")[1];
+    const decoded = jwt.verify(token, JWT_SECRET);
 
-    // Enviar arquivos para o Supabase
-    const filePromises = [];
-
-    if (req.files['pdf']) {
-      console.log('Enviando PDF...');
-      filePromises.push(uploadFileToSupabase(req.files['pdf'][0]));
-    }
-    if (req.files['image']) {
-      console.log('Enviando Imagem...');
-      filePromises.push(uploadFileToSupabase(req.files['image'][0]));
-    }
-    if (req.files['video']) {
-      console.log('Enviando Vídeo...');
-      filePromises.push(uploadFileToSupabase(req.files['video'][0]));
-    }
-
-    const files = await Promise.all(filePromises);
-    console.log('Arquivos enviados:', files);
-
-    // Criar produto no banco de dados
+    // Salvar produto no banco de dados
     const savedProduct = await prisma.product.create({
       data: {
         name,
         category,
         description,
         userId: decoded.userId, // Associar o produto ao usuário
-        files: files, // Armazenar os caminhos dos arquivos
       },
     });
 
     res.status(201).json({
-      message: 'Produto cadastrado com sucesso',
+      message: "Produto cadastrado com sucesso",
       product: savedProduct,
     });
   } catch (err) {
-    console.error('Erro ao cadastrar produto:', err);
-    res.status(500).json({ error: 'Erro ao cadastrar produto' });
+    console.error("Erro ao cadastrar produto:", err);
+    res.status(500).json({ error: "Erro ao cadastrar produto" });
   }
 });
 
