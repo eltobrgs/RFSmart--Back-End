@@ -142,6 +142,9 @@ router.post("/produtos", upload.fields([
   { name: "video", maxCount: 1 }
 ]), async (req, res) => {
   try {
+    console.log("Requisição recebida:", req.body);
+    console.log("Arquivos recebidos:", req.files);
+
     const { name, category, description } = req.body;
     const authHeader = req.headers.authorization;
 
@@ -158,9 +161,13 @@ router.post("/produtos", upload.fields([
         const file = req.files[fileKey][0];
         const uploadStream = bucket.openUploadStream(file.originalname);
         uploadStream.end(file.buffer);
-        fileIds[fileKey] = uploadStream.id;
+
+        console.log(`Arquivo ${fileKey} salvo com ID:`, uploadStream.id);
+        fileIds[fileKey] = uploadStream.id.toString();
       }
     }
+
+    console.log("Salvando produto no banco:", { name, category, description, fileIds });
 
     const savedProduct = await prisma.product.create({
       data: {
@@ -174,15 +181,17 @@ router.post("/produtos", upload.fields([
       },
     });
 
+    console.log("Produto cadastrado com sucesso:", savedProduct);
     res.status(201).json({
       message: "Produto cadastrado com sucesso",
       product: savedProduct,
     });
   } catch (err) {
     console.error("Erro ao cadastrar produto:", err);
-    res.status(500).json({ error: "Erro ao cadastrar produto" });
+    res.status(500).json({ error: "Erro ao cadastrar produto", details: err.message });
   }
 });
+
 
 // Endpoint para recuperar produto com arquivos
 router.get("/produtos/:id", async (req, res) => {
