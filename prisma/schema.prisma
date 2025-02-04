@@ -28,6 +28,9 @@ model Product {
   description String
   userId      String   @map("user_id") @db.ObjectId
   user        User     @relation("User Products", fields: [userId], references: [id])
+  pdfUrl      String   // URL do PDF
+  imageUrl    String   // URL da imagem
+  videoUrl    String   // URL do vídeo
 }
 
 

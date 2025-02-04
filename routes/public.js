@@ -2,10 +2,24 @@ import express from 'express';
 import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
 import { PrismaClient } from '@prisma/client';
+import multer from 'multer';
+import { GridFSBucket } from 'mongodb';
+import mongoose from 'mongoose';
 
 const router = express.Router();
 const prisma = new PrismaClient();
 const JWT_SECRET = process.env.JWT_SECRET;
+
+// Configuração do Multer para armazenar arquivos na memória
+const storage = multer.memoryStorage();
+const upload = multer({ storage: storage });
+
+// Conectar ao GridFS
+const conn = mongoose.connection;
+let bucket;
+conn.once("open", () => {
+  bucket = new GridFSBucket(conn.db, { bucketName: "uploads" });
+});
 
 // Endpoint de Cadastro
 router.post("/cadastro", async (req, res) => {
@@ -115,7 +129,18 @@ router.get("/me", async (req, res) => {
   }
 });
 
-router.post("/produtos", async (req, res) => {
+
+
+
+
+
+
+// Endpoint para cadastrar produto com upload de arquivos
+router.post("/produtos", upload.fields([
+  { name: "pdf", maxCount: 1 },
+  { name: "image", maxCount: 1 },
+  { name: "video", maxCount: 1 }
+]), async (req, res) => {
   try {
     const { name, category, description } = req.body;
     const authHeader = req.headers.authorization;
@@ -127,13 +152,25 @@ router.post("/produtos", async (req, res) => {
     const token = authHeader.split(" ")[1];
     const decoded = jwt.verify(token, JWT_SECRET);
 
-    // Salvar produto no banco de dados
+    let fileIds = {};
+    for (const fileKey of ["pdf", "image", "video"]) {
+      if (req.files[fileKey]) {
+        const file = req.files[fileKey][0];
+        const uploadStream = bucket.openUploadStream(file.originalname);
+        uploadStream.end(file.buffer);
+        fileIds[fileKey] = uploadStream.id;
+      }
+    }
+
     const savedProduct = await prisma.product.create({
       data: {
         name,
         category,
         description,
-        userId: decoded.userId, // Associar o produto ao usuário
+        userId: decoded.userId,
+        pdfId: fileIds.pdf || null,
+        imageId: fileIds.image || null,
+        videoId: fileIds.video || null,
       },
     });
 
@@ -147,27 +184,39 @@ router.post("/produtos", async (req, res) => {
   }
 });
 
-// Endpoint de Listagem de Produtos
-router.get("/produtos", async (req, res) => {
+// Endpoint para recuperar produto com arquivos
+router.get("/produtos/:id", async (req, res) => {
   try {
-    const authHeader = req.headers.authorization;
-
-    if (!authHeader) {
-      return res.status(401).json({ error: "Token não fornecido" });
-    }
-
-    const token = authHeader.split(" ")[1];
-    const decoded = jwt.verify(token, JWT_SECRET);
-
-    // Buscar produtos do usuário
-    const products = await prisma.product.findMany({
-      where: { userId: decoded.userId },
+    const { id } = req.params;
+    const product = await prisma.product.findUnique({
+      where: { id },
     });
 
-    res.status(200).json(products);
+    if (!product) {
+      return res.status(404).json({ error: "Produto não encontrado" });
+    }
+
+    res.status(200).json({
+      ...product,
+      pdfUrl: product.pdfId ? `/arquivos/${product.pdfId}` : null,
+      imageUrl: product.imageId ? `/arquivos/${product.imageId}` : null,
+      videoUrl: product.videoId ? `/arquivos/${product.videoId}` : null,
+    });
   } catch (err) {
-    console.error("Erro ao listar produtos:", err);
-    res.status(500).json({ error: "Erro ao listar produtos" });
+    console.error("Erro ao buscar produto:", err);
+    res.status(500).json({ error: "Erro ao buscar produto" });
+  }
+});
+
+// Endpoint para recuperar arquivos
+router.get("/arquivos/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const downloadStream = bucket.openDownloadStream(new mongoose.Types.ObjectId(id));
+    downloadStream.pipe(res);
+  } catch (err) {
+    console.error("Erro ao recuperar arquivo:", err);
+    res.status(500).json({ error: "Erro ao recuperar arquivo" });
   }
 });
 
