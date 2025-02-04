@@ -141,6 +141,9 @@ router.get("/me", async (req, res) => {
 // Endpoint para cadastrar produtos com arquivos
 router.post('/produtos', upload.fields([{ name: 'pdf' }, { name: 'image' }, { name: 'video' }]), async (req, res) => {
   try {
+    console.log('Dados do corpo:', req.body);
+    console.log('Arquivos recebidos:', req.files);
+
     const { name, category, description } = req.body;
     const authHeader = req.headers.authorization;
 
@@ -155,16 +158,20 @@ router.post('/produtos', upload.fields([{ name: 'pdf' }, { name: 'image' }, { na
     const filePromises = [];
 
     if (req.files['pdf']) {
+      console.log('Enviando PDF...');
       filePromises.push(uploadFileToSupabase(req.files['pdf'][0]));
     }
     if (req.files['image']) {
+      console.log('Enviando Imagem...');
       filePromises.push(uploadFileToSupabase(req.files['image'][0]));
     }
     if (req.files['video']) {
+      console.log('Enviando Vídeo...');
       filePromises.push(uploadFileToSupabase(req.files['video'][0]));
     }
 
     const files = await Promise.all(filePromises);
+    console.log('Arquivos enviados:', files);
 
     // Criar produto no banco de dados
     const savedProduct = await prisma.product.create({
