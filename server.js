@@ -28,7 +28,6 @@ import privateRoutes from './routes/private.js';
 import auth from './middlewares/auth.js';
 import multer from 'multer';
 import { createClient } from '@supabase/supabase-js';
-
 // Carregar variáveis de ambiente
 dotenv.config();
 
