@@ -3,7 +3,7 @@ import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
 import multer from 'multer';
 import { PrismaClient } from '@prisma/client';
-import { supabase } from '../services/supabaseClient';
+import { supabase } from './services/supabaseClient';  // Se estiver na mesma pasta 'src'
 
 const router = express.Router();
 const prisma = new PrismaClient();
