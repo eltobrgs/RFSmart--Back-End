@@ -1,6 +1,12 @@
 //helpers/uploadProductFiles.js
-import supabase from '../supabaseClient';  // Caminho para o seu arquivo de configuração do Supabase
 import { PrismaClient } from '@prisma/client';
+//services/supabaseclient.js
+import { createClient } from '@supabase/supabase-js';
+
+const supabaseUrl = process.env.SUPABASE_URL;
+const supabaseKey = process.env.SUPABASE_KEY;
+
+export const supabase = createClient(supabaseUrl, supabaseKey);
 
 const prisma = new PrismaClient();
 

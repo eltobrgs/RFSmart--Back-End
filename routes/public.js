@@ -3,7 +3,6 @@ import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
 import multer from 'multer';
 import { PrismaClient } from '@prisma/client';
-import { supabase } from './services/supabaseClient';  // Se estiver na mesma pasta 'src'
 
 const router = express.Router();
 const prisma = new PrismaClient();
@@ -120,6 +119,15 @@ router.get("/me", async (req, res) => {
     res.status(500).json({ error: "Erro ao buscar dados do usuário" });
   }
 });
+
+//services/supabaseclient.js
+import { createClient } from '@supabase/supabase-js';
+
+const supabaseUrl = process.env.SUPABASE_URL;
+const supabaseKey = process.env.SUPABASE_KEY;
+
+export const supabase = createClient(supabaseUrl, supabaseKey);
+
 
 // Endpoint de Cadastro de Produto com Upload de Arquivos
 router.post("/produtos", upload.fields([{ name: 'image' }, { name: 'video' }, { name: 'pdf' }]), async (req, res) => {
