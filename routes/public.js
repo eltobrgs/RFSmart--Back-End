@@ -1,16 +1,11 @@
 import express from 'express';
 import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
-import multer from 'multer';
 import { PrismaClient } from '@prisma/client';
 
 const router = express.Router();
 const prisma = new PrismaClient();
 const JWT_SECRET = process.env.JWT_SECRET;
-
-// Configuração do multer para armazenar os arquivos temporariamente
-const storage = multer.memoryStorage();
-const upload = multer({ storage });
 
 // Endpoint de Cadastro
 router.post("/cadastro", async (req, res) => {
@@ -120,20 +115,9 @@ router.get("/me", async (req, res) => {
   }
 });
 
-//services/supabaseclient.js
-import { createClient } from '@supabase/supabase-js';
-
-const supabaseUrl = process.env.SUPABASE_URL;
-const supabaseKey = process.env.SUPABASE_KEY;
-
-export const supabase = createClient(supabaseUrl, supabaseKey);
-
-
-// Endpoint de Cadastro de Produto com Upload de Arquivos
-router.post("/produtos", upload.fields([{ name: 'image' }, { name: 'video' }, { name: 'pdf' }]), async (req, res) => {
+router.post("/produtos", async (req, res) => {
   try {
     const { name, category, description } = req.body;
-    const { video, pdf, image } = req.files;
     const authHeader = req.headers.authorization;
 
     if (!authHeader) {
@@ -143,52 +127,13 @@ router.post("/produtos", upload.fields([{ name: 'image' }, { name: 'video' }, { 
     const token = authHeader.split(" ")[1];
     const decoded = jwt.verify(token, JWT_SECRET);
 
-    // Realizando o upload dos arquivos para o Supabase
-    const videoUpload = await supabase
-      .storage
-      .from('videos') // Nome do bucket de vídeos
-      .upload(`produtos/${Date.now()}_${video[0].originalname}`, video[0].buffer);
-
-    const pdfUpload = await supabase
-      .storage
-      .from('pdfs') // Nome do bucket de PDFs
-      .upload(`produtos/${Date.now()}_${pdf[0].originalname}`, pdf[0].buffer);
-
-    const imageUpload = await supabase
-      .storage
-      .from('imagens') // Nome do bucket de imagens
-      .upload(`produtos/${Date.now()}_${image[0].originalname}`, image[0].buffer);
-
-    if (videoUpload.error || pdfUpload.error || imageUpload.error) {
-      return res.status(500).json({ error: "Erro ao fazer upload dos arquivos" });
-    }
-
-    // Obtendo as URLs públicas dos arquivos
-    const videoUrl = supabase
-      .storage
-      .from('videos')
-      .getPublicUrl(videoUpload.data.path).publicURL;
-
-    const pdfUrl = supabase
-      .storage
-      .from('pdfs')
-      .getPublicUrl(pdfUpload.data.path).publicURL;
-
-    const imageUrl = supabase
-      .storage
-      .from('imagens')
-      .getPublicUrl(imageUpload.data.path).publicURL;
-
-    // Salvar o produto no banco de dados com as URLs dos arquivos
+    // Salvar produto no banco de dados
     const savedProduct = await prisma.product.create({
       data: {
         name,
         category,
         description,
         userId: decoded.userId, // Associar o produto ao usuário
-        videoUrl,
-        pdfUrl,
-        imageUrl,
       },
     });
 
