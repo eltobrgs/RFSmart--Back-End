@@ -14,11 +14,12 @@ datasource db {
 }
 
 model User {
-  id        String       @id @default(auto()) @map("_id") @db.ObjectId
-  email     String       @unique
+  id        String     @id @default(auto()) @map("_id") @db.ObjectId
+  email     String     @unique
   name      String?
   password  String
-  products  Product[]    @relation("User Products")
+  role      Role       @default(USER)  // Adicionado papel do usuário
+  products  Product[]  @relation("User Products")
 }
 
 model Product {
@@ -31,4 +32,8 @@ model Product {
 }
 
 
-
+//ROLE DO USUÁRIO 
+enum Role {
+  USER      // Usuário comum
+  VENDEDOR  // Vendedor
+}
