@@ -265,5 +265,23 @@ router.get("/cursos", async (req, res) => {
   }
 });
 
+// Endpoint para buscar detalhes de um curso específico
+router.get("/cursos/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const course = await prisma.product.findUnique({
+      where: { id: parseInt(id) }
+    });
+    
+    if (!course) {
+      return res.status(404).json({ error: "Curso não encontrado" });
+    }
+    
+    res.status(200).json(course);
+  } catch (err) {
+    console.error("Erro ao buscar detalhes do curso:", err);
+    res.status(500).json({ error: "Erro ao buscar detalhes do curso" });
+  }
+});
 
 export default router;
