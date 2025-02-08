@@ -3,69 +3,42 @@ import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
 import { PrismaClient } from '@prisma/client';
 
+// Inicialização do router e conexão com banco de dados
 const router = express.Router();
 const prisma = new PrismaClient();
 const JWT_SECRET = process.env.JWT_SECRET;
 
-// Endpoint de Cadastro ANTIGO SEM ROLE
-// router.post("/cadastro", async (req, res) => {
-//   try {
-//     const user = req.body;
-//     console.log("Dados do usuário recebidos:", user);
+// =============== AUTENTICAÇÃO ===============
 
-//     // Gerar hash da senha
-//     const salt = await bcrypt.genSalt(10);
-//     const hash = await bcrypt.hash(user.password, salt);
-
-//     // Salvar usuário no banco de dados
-//     const savedUser = await prisma.user.create({
-//       data: {
-//         name: user.name,
-//         email: user.email,
-//         password: hash,
-//       },
-//     });
-//     console.log("Usuário salvo no banco de dados:", savedUser);
-
-//     // Gerar o token JWT
-//     const token = jwt.sign({ userId: savedUser.id }, JWT_SECRET, { expiresIn: '1h' });
-
-//     // Retornar o token e dados do usuário (sem a senha)
-//     res.status(201).json({
-//       message: "Cadastro realizado com sucesso",
-//       token: token,
-//       user: {
-//         id: savedUser.id,
-//         name: savedUser.name,
-//         email: savedUser.email,
-//       },
-//     });
-//   } catch (err) {
-//     console.error("Erro ao realizar cadastro:", err);
-//     res.status(500).json({ error: "Erro ao realizar cadastro" });
-//   }
-// });
-
+/**
+ * Rota de Cadastro de Usuários
+ * POST /cadastro
+ * Permite cadastro de usuários com roles específicos (USER ou VENDEDOR)
+ */
 router.post("/cadastro", async (req, res) => {
   try {
     const { name, email, password, role } = req.body;
 
-    // Verifica se o role é válido
+    // Validação do tipo de usuário
     if (role !== "USER" && role !== "VENDEDOR") {
       return res.status(400).json({ error: "Tipo de usuário inválido" });
     }
 
-    // Gerar hash da senha
+    // Criptografia da senha
     const salt = await bcrypt.genSalt(10);
     const hash = await bcrypt.hash(password, salt);
 
-    // Salvar usuário no banco de dados
+    // Criação do usuário no banco
     const savedUser = await prisma.user.create({
       data: { name, email, password: hash, role },
     });
 
-    // Gerar token JWT
-    const token = jwt.sign({ userId: savedUser.id, role: savedUser.role }, JWT_SECRET, { expiresIn: '1h' });
+    // Geração do token JWT com role incluída
+    const token = jwt.sign(
+      { userId: savedUser.id, role: savedUser.role }, 
+      JWT_SECRET, 
+      { expiresIn: '1h' }
+    );
 
     res.status(201).json({
       message: "Cadastro realizado com sucesso",
@@ -78,36 +51,36 @@ router.post("/cadastro", async (req, res) => {
   }
 });
 
-
-// Endpoint de Login
+/**
+ * Rota de Login
+ * POST /login
+ * Autentica usuário e retorna token JWT
+ */
 router.post("/login", async (req, res) => {
   try {
     const { email, password } = req.body;
-    console.log("Tentativa de login com email:", email);
 
-    // Buscar usuário pelo email
+    // Busca usuário no banco
     const user = await prisma.user.findUnique({
       where: { email },
     });
 
     if (!user) {
-      console.log("Usuário não encontrado:", email);
       return res.status(404).json({ error: "Usuário não encontrado" });
     }
 
-    // Verificar senha
+    // Verifica senha
     const isMatch = await bcrypt.compare(password, user.password);
     if (!isMatch) {
-      console.log("Senha incorreta para o usuário:", email);
       return res.status(401).json({ error: "Senha incorreta" });
     }
 
-    // Gerar o token JWT
+    // Gera token JWT
     const token = jwt.sign({ userId: user.id }, JWT_SECRET, { expiresIn: '10m' });
 
     res.status(200).json({
       message: "Login bem-sucedido",
-      token: token,
+      token,
       user: {
         id: user.id,
         name: user.name,
@@ -120,7 +93,11 @@ router.post("/login", async (req, res) => {
   }
 });
 
-// Endpoint para buscar dados do usuário
+/**
+ * Rota para Dados do Usuário
+ * GET /me
+ * Retorna dados do usuário autenticado
+ */
 router.get("/me", async (req, res) => {
   try {
     const authHeader = req.headers.authorization;
@@ -134,7 +111,7 @@ router.get("/me", async (req, res) => {
 
     const user = await prisma.user.findUnique({
       where: { id: decoded.userId },
-      select: { id: true, name: true, email: true, role:true }, // Campos retornados
+      select: { id: true, name: true, email: true, role: true },
     });
 
     if (!user) {
@@ -148,40 +125,13 @@ router.get("/me", async (req, res) => {
   }
 });
 
-//ANTIGO ENDPOINT DE CADASTRO DE PRODUTOS SEM ROLE
-// router.post("/produtos", async (req, res) => {
-//   try {
-//     const { name, category, description } = req.body;
-//     const authHeader = req.headers.authorization;
+// =============== PRODUTOS ===============
 
-//     if (!authHeader) {
-//       return res.status(401).json({ error: "Token não fornecido" });
-//     }
-
-//     const token = authHeader.split(" ")[1];
-//     const decoded = jwt.verify(token, JWT_SECRET);
-
-//     // Salvar produto no banco de dados
-//     const savedProduct = await prisma.product.create({
-//       data: {
-//         name,
-//         category,
-//         description,
-//         userId: decoded.userId, // Associar o produto ao usuário
-//       },
-//     });
-
-//     res.status(201).json({
-//       message: "Produto cadastrado com sucesso",
-//       product: savedProduct,
-//     });
-//   } catch (err) {
-//     console.error("Erro ao cadastrar produto:", err);
-//     res.status(500).json({ error: "Erro ao cadastrar produto" });
-//   }
-// });
-
-// Endpoint de Cadastro de Produtos
+/**
+ * Rota de Cadastro de Produtos
+ * POST /produtos
+ * Permite que vendedores cadastrem novos produtos
+ */
 router.post("/produtos", async (req, res) => {
   try {
     const { name, category, description } = req.body;
@@ -194,7 +144,7 @@ router.post("/produtos", async (req, res) => {
     const token = authHeader.split(" ")[1];
     const decoded = jwt.verify(token, JWT_SECRET);
 
-    // Buscar usuário pelo ID para verificar o papel
+    // Verifica se o usuário é vendedor
     const user = await prisma.user.findUnique({
       where: { id: decoded.userId },
     });
@@ -203,7 +153,7 @@ router.post("/produtos", async (req, res) => {
       return res.status(403).json({ error: "Apenas vendedores podem cadastrar produtos" });
     }
 
-    // Salvar produto no banco de dados
+    // Cadastra o produto
     const savedProduct = await prisma.product.create({
       data: {
         name,
@@ -223,7 +173,11 @@ router.post("/produtos", async (req, res) => {
   }
 });
 
-// Endpoint de Listagem de Produtos
+/**
+ * Rota de Listagem de Produtos do Usuário
+ * GET /produtos
+ * Lista todos os produtos cadastrados pelo usuário
+ */
 router.get("/produtos", async (req, res) => {
   try {
     const authHeader = req.headers.authorization;
@@ -235,7 +189,6 @@ router.get("/produtos", async (req, res) => {
     const token = authHeader.split(" ")[1];
     const decoded = jwt.verify(token, JWT_SECRET);
 
-    // Buscar produtos do usuário
     const products = await prisma.product.findMany({
       where: { userId: decoded.userId },
     });
@@ -247,17 +200,52 @@ router.get("/produtos", async (req, res) => {
   }
 });
 
-// Endpoint para listar cursos, agrupados por categoria
+/**
+ * Rota de Detalhes do Produto
+ * GET /product/:id
+ * Retorna detalhes de um produto específico
+ */
+router.get("/product/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const product = await prisma.product.findUnique({
+      where: { id },
+      include: {
+        user: {
+          select: {
+            name: true
+          }
+        }
+      }
+    });
+
+    if (!product) {
+      return res.status(404).json({ error: "Produto não encontrado" });
+    }
+
+    res.status(200).json(product);
+  } catch (err) {
+    console.error("Erro ao buscar detalhes do produto:", err);
+    res.status(500).json({ error: "Erro ao buscar detalhes do produto" });
+  }
+});
+
+/**
+ * Rota de Listagem de Cursos
+ * GET /cursos
+ * Lista todos os cursos agrupados por categoria
+ */
 router.get("/cursos", async (req, res) => {
   try {
-    // Busca todos os cursos cadastrados
     const courses = await prisma.product.findMany({});
-    // Agrupa os cursos por categoria
+    
+    // Agrupa cursos por categoria
     const coursesByCategory = courses.reduce((acc, course) => {
       if (!acc[course.category]) acc[course.category] = [];
       acc[course.category].push(course);
       return acc;
     }, {});
+    
     res.status(200).json(coursesByCategory);
   } catch (err) {
     console.error("Erro ao listar cursos:", err);
@@ -265,23 +253,6 @@ router.get("/cursos", async (req, res) => {
   }
 });
 
-// Endpoint para buscar detalhes de um curso específico
-router.get("/cursos/:id", async (req, res) => {
-  try {
-    const { id } = req.params;
-    const course = await prisma.product.findUnique({
-      where: { id: parseInt(id) }
-    });
-    
-    if (!course) {
-      return res.status(404).json({ error: "Curso não encontrado" });
-    }
-    
-    res.status(200).json(course);
-  } catch (err) {
-    console.error("Erro ao buscar detalhes do curso:", err);
-    res.status(500).json({ error: "Erro ao buscar detalhes do curso" });
-  }
-});
+
 
 export default router;
