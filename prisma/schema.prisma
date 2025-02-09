@@ -14,24 +14,29 @@ datasource db {
 }
 
 model User {
-  id        String     @id @default(auto()) @map("_id") @db.ObjectId
-  email     String     @unique
-  name      String?
-  password  String
-  role      Role       @default(USER)  // Adicionado papel do usuário
-  products  Product[]  @relation("UserProducts")
+  id            String    @id @default(auto()) @map("_id") @db.ObjectId
+  email         String    @unique
+  name          String?
+  password      String
+  role          Role      @default(USER)
+  products      Product[] @relation("UserProducts")
+  accessibleCourseIds String[] @db.ObjectId
+  createdAt     DateTime? @default(now())
+  updatedAt     DateTime? @updatedAt
 }
 
 model Product {
-  id          String    @id @default(auto()) @map("_id") @db.ObjectId
-  name        String
-  category    String
-  description String
-  userId      String?   @db.ObjectId
-  user        User?     @relation("UserProducts", fields: [userId], references: [id])
-  modules     Module[]  @relation("ProductModules")
-  createdAt   DateTime? @default(now())  // Tornando opcional
-  updatedAt   DateTime? @default(now())  // Tornando opcional
+  id              String    @id @default(auto()) @map("_id") @db.ObjectId
+  name            String
+  category        String
+  description     String
+  whatsapp        String?   // Número do WhatsApp do vendedor
+  userId          String?   @db.ObjectId
+  user            User?     @relation("UserProducts", fields: [userId], references: [id])
+  modules         Module[]  @relation("ProductModules")
+  userAccessIds   String[]  @db.ObjectId
+  createdAt       DateTime? @default(now())
+  updatedAt       DateTime? @updatedAt
 }
 
 model Module {
@@ -42,8 +47,8 @@ model Module {
   productId   String    @db.ObjectId
   product     Product   @relation("ProductModules", fields: [productId], references: [id])
   lessons     Lesson[]  @relation("ModuleLessons")
-  createdAt   DateTime? @default(now())  // Tornando opcional
-  updatedAt   DateTime? @default(now())  // Tornando opcional
+  createdAt   DateTime? @default(now())
+  updatedAt   DateTime? @updatedAt
 }
 
 model Lesson {
@@ -54,9 +59,10 @@ model Lesson {
   order       Int
   moduleId    String    @db.ObjectId
   module      Module    @relation("ModuleLessons", fields: [moduleId], references: [id])
-  createdAt   DateTime? @default(now())  // Tornando opcional
-  updatedAt   DateTime? @default(now())  // Tornando opcional
+  createdAt   DateTime? @default(now())
+  updatedAt   DateTime? @updatedAt
 }
+
 //ROLE DO USUÁRIO 
 enum Role {
   USER      // Usuário comum

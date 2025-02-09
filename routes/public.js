@@ -134,7 +134,7 @@ router.get("/me", async (req, res) => {
  */
 router.post("/produtos", async (req, res) => {
   try {
-    const { name, category, description } = req.body;
+    const { name, category, description, whatsapp } = req.body;
     const authHeader = req.headers.authorization;
 
     if (!authHeader) {
@@ -159,6 +159,7 @@ router.post("/produtos", async (req, res) => {
         name,
         category,
         description,
+        whatsapp, // Armazena o link diretamente
         userId: user.id,
       },
     });
@@ -338,6 +339,100 @@ router.get("/product/:id", async (req, res) => {
 }); 
 
 /**
+ * Rota para gerenciar acesso de usuários ao curso
+ * POST /produtos/:productId/access
+ */
+router.post("/produtos/:productId/access", async (req, res) => {
+  try {
+    const { productId } = req.params;
+    const { userId, action } = req.body;
+    
+    if (action === 'grant') {
+      // Adiciona o ID do curso aos cursos acessíveis do usuário
+      await prisma.user.update({
+        where: { id: userId },
+        data: {
+          accessibleCourseIds: {
+            push: productId
+          }
+        }
+      });
+      
+      // Adiciona o ID do usuário à lista de usuários com acesso ao curso
+      await prisma.product.update({
+        where: { id: productId },
+        data: {
+          userAccessIds: {
+            push: userId
+          }
+        }
+      });
+    } else if (action === 'revoke') {
+      // Remove o ID do curso dos cursos acessíveis do usuário
+      await prisma.user.update({
+        where: { id: userId },
+        data: {
+          accessibleCourseIds: {
+            set: {
+              accessibleCourseIds: {
+                filter: id => id !== productId
+              }
+            }
+          }
+        }
+      });
+      
+      // Remove o ID do usuário da lista de usuários com acesso ao curso
+      await prisma.product.update({
+        where: { id: productId },
+        data: {
+          userAccessIds: {
+            set: {
+              userAccessIds: {
+                filter: id => id !== userId
+              }
+            }
+          }
+        }
+      });
+    }
+
+    res.status(200).json({ message: "Acesso atualizado com sucesso" });
+  } catch (err) {
+    console.error("Erro ao gerenciar acesso:", err);
+    res.status(500).json({ error: "Erro ao gerenciar acesso" });
+  }
+});
+
+/**
+ * Rota para listar usuários com acesso ao curso
+ * GET /produtos/:productId/users
+ */
+router.get("/produtos/:productId/users", async (req, res) => {
+  try {
+    const { productId } = req.params;
+    const users = await prisma.user.findMany({
+      where: {
+        role: "USER",
+        accessibleCourseIds: {
+          has: productId
+        }
+      },
+      select: {
+        id: true,
+        name: true,
+        email: true
+      }
+    });
+
+    res.status(200).json(users);
+  } catch (err) {
+    console.error("Erro ao listar usuários:", err);
+    res.status(500).json({ error: "Erro ao listar usuários" });
+  }
+});
+
+/**
  * Rota de Listagem de Cursos com Paginação e Filtros
  * GET /cursos
  * Query params:
@@ -349,66 +444,54 @@ router.get("/product/:id", async (req, res) => {
  */
 router.get("/cursos", async (req, res) => {
   try {
-    console.log("Iniciando busca de cursos...");
-    
-    // Buscar todos os cursos com try/catch específico
-    let courses;
-    try {
-      courses = await prisma.product.findMany({
-        include: {
-          user: {
-            select: {
-              name: true
-            }
-          },
-          _count: {
-            select: {
-              modules: true
-            }
+    const authHeader = req.headers.authorization;
+    if (!authHeader) {
+      return res.status(401).json({ error: "Token não fornecido" });
+    }
+
+    const token = authHeader.split(" ")[1];
+    const decoded = jwt.verify(token, JWT_SECRET);
+
+    const courses = await prisma.product.findMany({
+      include: {
+        user: {
+          select: {
+            name: true
           }
         }
-      });
-      console.log("Cursos encontrados:", courses);
-    } catch (queryErr) {
-      console.error("Erro na query:", queryErr);
-      return res.status(500).json({ error: "Erro ao buscar cursos no banco" });
-    }
-
-    // Verificar se courses é um array válido
-    if (!Array.isArray(courses)) {
-      console.error("Resultado não é um array:", courses);
-      return res.status(500).json({ error: "Formato de dados inválido" });
-    }
-
-    // Filtrar cursos sem userId e agrupar por categoria
-    let coursesByCategory;
-    try {
-      // Filtrar apenas cursos válidos (com userId)
-      const validCourses = courses.filter(course => course.userId);
-      
-      coursesByCategory = validCourses.reduce((acc, course) => {
-        const category = course.category || 'Sem Categoria';
-        if (!acc[category]) acc[category] = [];
-        acc[category].push({
-          ...course,
-          modulesCount: course._count?.modules || 0
-        });
-        return acc;
-      }, {});
-      console.log("Cursos agrupados:", coursesByCategory);
-    } catch (groupErr) {
-      console.error("Erro ao agrupar cursos:", groupErr);
-      return res.status(500).json({ error: "Erro ao processar dados dos cursos" });
-    }
-
-    // Retornar no formato antigo
-    return res.status(200).json(coursesByCategory);
-  } catch (err) {
-    console.error("Erro detalhado ao listar cursos:", err);
-    return res.status(500).json({ 
-      error: "Erro ao listar cursos",
-      details: err.message 
+      }
     });
+
+    // Separar cursos por acesso
+    const availableCourses = {};
+    const unavailableCourses = {};
+
+    courses.forEach(course => {
+      const hasAccess = course.userAccessIds.includes(decoded.userId);
+      const category = course.category || 'Sem Categoria';
+      
+      const courseData = {
+        ...course,
+        hasAccess,
+        whatsapp: course.whatsapp
+      };
+      
+      if (hasAccess) {
+        if (!availableCourses[category]) availableCourses[category] = [];
+        availableCourses[category].push(courseData);
+      } else {
+        if (!unavailableCourses[category]) unavailableCourses[category] = [];
+        unavailableCourses[category].push(courseData);
+      }
+    });
+
+    res.status(200).json({
+      available: availableCourses,
+      unavailable: unavailableCourses
+    });
+  } catch (err) {
+    console.error("Erro ao listar cursos:", err);
+    res.status(500).json({ error: "Erro ao listar cursos" });
   }
 });
 
@@ -430,6 +513,68 @@ router.get("/categorias", async (req, res) => {
   } catch (err) {
     console.error("Erro ao buscar categorias:", err);
     res.status(500).json({ error: "Erro ao buscar categorias" });
+  }
+});
+
+/**
+ * Rota para listar todos os usuários
+ * GET /usuarios
+ */
+router.get("/usuarios", async (req, res) => {
+  try {
+    const users = await prisma.user.findMany({
+      where: {
+        role: "USER" // Filtra apenas usuários comuns
+      },
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        accessibleCourseIds: true // Para verificar se o usuário tem acesso ao curso
+      }
+    });
+
+    res.status(200).json(users);
+  } catch (err) {
+    console.error("Erro ao listar usuários:", err);
+    res.status(500).json({ error: "Erro ao listar usuários" });
+  }
+});
+
+
+/**
+ * Rota para deletar um curso específico
+ * DELETE /produtos/:id
+ */
+router.delete("/produtos/:id", async (req, res) => {
+  const { id } = req.params;
+
+  try {
+    // Deletar todas as lições associadas ao curso
+    await prisma.lesson.deleteMany({
+      where: {
+        module: {
+          productId: id // Deleta lições que pertencem aos módulos do curso
+        }
+      }
+    });
+
+    // Deletar todos os módulos associados ao curso
+    await prisma.module.deleteMany({
+      where: {
+        productId: id // Deleta módulos que pertencem ao curso
+      }
+    });
+
+    // Deletar o curso
+    await prisma.product.delete({
+      where: { id }
+    });
+
+    res.status(200).json({ message: "Curso, módulos e lições deletados com sucesso." });
+  } catch (err) {
+    console.error("Erro ao deletar curso:", err);
+    res.status(500).json({ error: "Erro ao deletar curso" });
   }
 });
 
