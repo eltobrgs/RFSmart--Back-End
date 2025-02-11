@@ -304,6 +304,10 @@ router.post("/modules/:moduleId/lessons", async (req, res) => {
 router.get("/product/:id", async (req, res) => {
   try {
     const { id } = req.params;
+    const token = req.headers.authorization?.split(" ")[1];
+    const decoded = jwt.verify(token, JWT_SECRET);
+    const userId = decoded.userId;
+
     const product = await prisma.product.findUnique({
       where: { id },
       include: {
@@ -321,6 +325,11 @@ router.get("/product/:id", async (req, res) => {
               orderBy: {
                 order: 'asc'
               }
+            },
+            userAccess: {
+              where: {
+                userId: userId
+              }
             }
           }
         }
@@ -331,12 +340,22 @@ router.get("/product/:id", async (req, res) => {
       return res.status(404).json({ error: "Produto não encontrado" });
     }
 
-    res.status(200).json(product);
+    // Add access flag to each module but keep all lessons
+    const productWithAccess = {
+      ...product,
+      modules: product.modules.map(module => ({
+        ...module,
+        hasAccess: module.userAccess.length > 0
+        // Não filtramos mais as lessons aqui
+      }))
+    };
+
+    res.status(200).json(productWithAccess);
   } catch (err) {
     console.error("Erro ao buscar detalhes do produto:", err);
     res.status(500).json({ error: "Erro ao buscar detalhes do produto" });
   }
-}); 
+});
 
 /**
  * Rota para gerenciar acesso de usuários ao curso
@@ -433,62 +452,70 @@ router.get("/produtos/:productId/users", async (req, res) => {
 });
 
 /**
- * Rota de Listagem de Cursos com Paginação e Filtros
+ * Rota para listar cursos disponíveis para o usuário
  * GET /cursos
- * Query params:
- * - page: número da página (default: 1)
- * - limit: itens por página (default: 10)
- * - category: filtro por categoria
- * - search: busca por nome ou descrição
- * - sort: ordenação (recent, name_asc, name_desc)
  */
 router.get("/cursos", async (req, res) => {
   try {
-    const authHeader = req.headers.authorization;
-    if (!authHeader) {
-      return res.status(401).json({ error: "Token não fornecido" });
-    }
-
-    const token = authHeader.split(" ")[1];
+    const token = req.headers.authorization?.split(" ")[1];
     const decoded = jwt.verify(token, JWT_SECRET);
+    const userId = decoded.userId;
 
-    const courses = await prisma.product.findMany({
+    // Buscar todos os cursos
+    const allProducts = await prisma.product.findMany({
       include: {
         user: {
           select: {
             name: true
           }
+        },
+        modules: {
+          include: {
+            userAccess: {
+              where: {
+                userId: userId
+              }
+            }
+          }
         }
       }
     });
 
-    // Separar cursos por acesso
-    const availableCourses = {};
-    const unavailableCourses = {};
+    // Separar cursos em disponíveis e indisponíveis
+    const categorizedProducts = {
+      available: {},
+      unavailable: {}
+    };
 
-    courses.forEach(course => {
-      const hasAccess = course.userAccessIds.includes(decoded.userId);
-      const category = course.category || 'Sem Categoria';
+    for (const product of allProducts) {
+      // Verifica se o usuário tem acesso a pelo menos um módulo do curso
+      const hasAccessToAnyModule = product.modules.some(module => module.userAccess.length > 0);
       
-      const courseData = {
-        ...course,
-        hasAccess,
-        whatsapp: course.whatsapp
+      const category = product.category;
+      const productData = {
+        id: product.id,
+        name: product.name,
+        description: product.description,
+        whatsapp: product.whatsapp,
+        authorName: product.user?.name || 'Autor Desconhecido'
       };
-      
-      if (hasAccess) {
-        if (!availableCourses[category]) availableCourses[category] = [];
-        availableCourses[category].push(courseData);
-      } else {
-        if (!unavailableCourses[category]) unavailableCourses[category] = [];
-        unavailableCourses[category].push(courseData);
-      }
-    });
 
-    res.status(200).json({
-      available: availableCourses,
-      unavailable: unavailableCourses
-    });
+      if (hasAccessToAnyModule) {
+        // Curso disponível
+        if (!categorizedProducts.available[category]) {
+          categorizedProducts.available[category] = [];
+        }
+        categorizedProducts.available[category].push(productData);
+      } else {
+        // Curso indisponível
+        if (!categorizedProducts.unavailable[category]) {
+          categorizedProducts.unavailable[category] = [];
+        }
+        categorizedProducts.unavailable[category].push(productData);
+      }
+    }
+
+    res.status(200).json(categorizedProducts);
   } catch (err) {
     console.error("Erro ao listar cursos:", err);
     res.status(500).json({ error: "Erro ao listar cursos" });
@@ -541,7 +568,6 @@ router.get("/usuarios", async (req, res) => {
   }
 });
 
-
 /**
  * Rota para deletar um curso específico
  * DELETE /produtos/:id
@@ -575,6 +601,139 @@ router.delete("/produtos/:id", async (req, res) => {
   } catch (err) {
     console.error("Erro ao deletar curso:", err);
     res.status(500).json({ error: "Erro ao deletar curso" });
+  }
+});
+
+/**
+ * Rota para atualizar acesso aos módulos
+ * POST /produtos/:productId/module-access
+ */
+router.post("/produtos/:productId/module-access", async (req, res) => {
+  try {
+    const { productId } = req.params;
+    const { userId, moduleAccess } = req.body;
+    
+    // Primeiro, remove todos os acessos existentes para este usuário neste produto
+    await prisma.userModuleAccess.deleteMany({
+      where: {
+        module: {
+          productId: productId
+        },
+        userId: userId
+      }
+    });
+
+    // Adiciona os novos acessos aos módulos
+    if (moduleAccess && moduleAccess.length > 0) {
+      await prisma.userModuleAccess.createMany({
+        data: moduleAccess.map(moduleId => ({
+          userId,
+          moduleId
+        }))
+      });
+
+      // Se há pelo menos um módulo com acesso, adiciona o ID do curso à lista de cursos acessíveis do usuário
+      await prisma.user.update({
+        where: { id: userId },
+        data: {
+          accessibleCourseIds: {
+            push: productId
+          }
+        }
+      });
+    } else {
+      // Se não há módulos com acesso, remove o ID do curso da lista de cursos acessíveis
+      const user = await prisma.user.findUnique({
+        where: { id: userId },
+        select: { accessibleCourseIds: true }
+      });
+
+      const updatedAccessibleCourseIds = user.accessibleCourseIds.filter(id => id !== productId);
+
+      await prisma.user.update({
+        where: { id: userId },
+        data: {
+          accessibleCourseIds: updatedAccessibleCourseIds
+        }
+      });
+    }
+
+    res.status(200).json({ message: "Acesso aos módulos atualizado com sucesso" });
+  } catch (err) {
+    console.error("Erro ao gerenciar acesso aos módulos:", err);
+    res.status(500).json({ error: "Erro ao gerenciar acesso aos módulos" });
+  }
+});
+
+/**
+ * Rota para obter acesso aos módulos de um usuário
+ * GET /produtos/:productId/module-access/:userId
+ */
+router.get("/produtos/:productId/module-access/:userId", async (req, res) => {
+  try {
+    const { productId, userId } = req.params;
+    
+    const moduleAccess = await prisma.userModuleAccess.findMany({
+      where: {
+        module: {
+          productId: productId
+        },
+        userId: userId
+      },
+      select: {
+        moduleId: true
+      }
+    });
+
+    res.status(200).json(moduleAccess.map(access => access.moduleId));
+  } catch (err) {
+    console.error("Erro ao buscar acesso aos módulos:", err);
+    res.status(500).json({ error: "Erro ao buscar acesso aos módulos" });
+  }
+});
+
+/**
+ * Rota para obter estatísticas do sistema
+ * GET /admin/stats
+ */
+router.get("/admin/stats", async (req, res) => {
+  try {
+    const [coursesCount, modulesCount, lessonsCount, usersCount] = await Promise.all([
+      prisma.product.count(),
+      prisma.module.count(),
+      prisma.lesson.count(),
+      prisma.user.count()
+    ]);
+
+    res.status(200).json({
+      coursesCount,
+      modulesCount,
+      lessonsCount,
+      usersCount
+    });
+  } catch (err) {
+    console.error("Erro ao buscar estatísticas:", err);
+    res.status(500).json({ error: "Erro ao buscar estatísticas" });
+  }
+});
+
+/**
+ * Rota para deletar todos os dados
+ * DELETE /admin/delete-all
+ */
+router.delete("/admin/delete-all", async (req, res) => {
+  try {
+    // Deletar todos os dados em ordem
+    await prisma.userModuleAccess.deleteMany({}); // Primeiro as relações
+    await prisma.lesson.deleteMany({}); // Depois as aulas
+    await prisma.module.deleteMany({}); // Depois os módulos
+    await prisma.product.deleteMany({}); // Depois os produtos
+    await prisma.user.deleteMany({}); // Todos os usuários
+
+    res.status(200).json({ message: "Todos os dados foram apagados com sucesso" });
+  } catch (err) {
+    console.error("Erro ao deletar dados:", err);
+    res.status(500).json({ error: "Erro ao deletar dados" });
   }
 });
 
