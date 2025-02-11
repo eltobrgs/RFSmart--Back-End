@@ -717,24 +717,6 @@ router.get("/admin/stats", async (req, res) => {
   }
 });
 
-/**
- * Rota para deletar todos os dados
- * DELETE /admin/delete-all
- */
-router.delete("/admin/delete-all", async (req, res) => {
-  try {
-    // Deletar todos os dados em ordem
-    await prisma.userModuleAccess.deleteMany({}); // Primeiro as relações
-    await prisma.lesson.deleteMany({}); // Depois as aulas
-    await prisma.module.deleteMany({}); // Depois os módulos
-    await prisma.product.deleteMany({}); // Depois os produtos
-    await prisma.user.deleteMany({}); // Todos os usuários
 
-    res.status(200).json({ message: "Todos os dados foram apagados com sucesso" });
-  } catch (err) {
-    console.error("Erro ao deletar dados:", err);
-    res.status(500).json({ error: "Erro ao deletar dados" });
-  }
-});
 
 export default router;
